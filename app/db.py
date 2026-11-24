@@ -65,6 +65,40 @@ CREATE TABLE IF NOT EXISTS reports (
 
 CREATE INDEX IF NOT EXISTS idx_reports_target
     ON reports (target_segment_id, created_at);
+
+-- Usage index: one row per (report, segment, calendar day) the report's
+-- immutable snapshot actually cites.  Populated synchronously inside the
+-- report-issuance write transaction for new reports, and backfilled batch by
+-- batch for reports that predate the index.  Querying discrepancies only ever
+-- reads this table; report snapshots are never parsed per query.
+CREATE TABLE IF NOT EXISTS report_reading_usage (
+    report_id     INTEGER NOT NULL REFERENCES reports(id),
+    segment_id    INTEGER NOT NULL REFERENCES segments(id),
+    reading_date  TEXT NOT NULL,
+    kwh_per_lamp  REAL NOT NULL,
+    role          TEXT NOT NULL CHECK (role IN ('target', 'control')),
+    PRIMARY KEY (report_id, segment_id, reading_date)
+);
+
+CREATE INDEX IF NOT EXISTS idx_usage_lookup
+    ON report_reading_usage (segment_id, reading_date);
+CREATE INDEX IF NOT EXISTS idx_usage_report
+    ON report_reading_usage (report_id);
+
+-- Backfill progress for reports issued before the usage index existed.
+-- A single row (id = 1) holds the high-water mark: every report with
+-- id <= last_processed_report_id has been attempted, and only successfully
+-- indexed reports move the mark, so a failed batch leaves progress untouched
+-- and a restart resumes with the same batch.
+CREATE TABLE IF NOT EXISTS usage_index_backfill_state (
+    id                          INTEGER PRIMARY KEY CHECK (id = 1),
+    status                      TEXT NOT NULL
+        CHECK (status IN ('running', 'completed')),
+    last_processed_report_id    INTEGER NOT NULL DEFAULT 0,
+    last_batch_size             INTEGER NOT NULL DEFAULT 0,
+    last_error                  TEXT,
+    updated_at                  TEXT NOT NULL
+);
 """
 
 

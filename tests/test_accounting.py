@@ -75,20 +75,6 @@ def _to_date(raw: dict[str, float]) -> dict[date, float]:
     return {date.fromisoformat(k): v for k, v in raw.items()}
 
 
-@pytest.fixture()
-def client(tmp_path, monkeypatch):
-    from fastapi.testclient import TestClient
-
-    from app.config import Settings
-    from app.main import create_app
-
-    db_path = tmp_path / "test.db"
-    monkeypatch.setenv("LIGHTS_DB_PATH", str(db_path))
-    app = create_app(Settings(db_path=str(db_path)))
-    with TestClient(app) as c:
-        yield c
-
-
 def test_issue_report_uses_7_day_windows_controls_and_net_savings(client):
     ids = seed(client)
     resp = client.post("/api/reports", params={"segment_id": ids["T-目标"]})

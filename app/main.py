@@ -7,10 +7,12 @@ from typing import Annotated
 from fastapi import Depends, FastAPI, Query, Request, Response
 from fastapi.responses import JSONResponse
 
-from . import __version__, service
+from . import __version__, service, usage
 from .config import Settings, load_settings
 from .db import Database
 from .models import (
+    BackfillBatchOut,
+    BackfillStatusOut,
     CorrectionResult,
     HealthOut,
     ReadingsOut,
@@ -21,6 +23,7 @@ from .models import (
     SegmentCreate,
     SegmentOut,
     SegmentPatch,
+    UsageDiscrepancyOut,
 )
 
 
@@ -56,6 +59,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             status_code=exc.status_code,
             content={"detail": exc.message, **exc.extra},
         )
+
+    @app.exception_handler(usage.UsageAuditError)
+    async def _usage_error_handler(
+        _: Request, exc: usage.UsageAuditError
+    ) -> JSONResponse:
+        return JSONResponse(status_code=exc.status_code, content={"detail": exc.message})
 
     @app.get("/healthz", response_model=HealthOut, tags=["ops"])
     def healthz() -> HealthOut:
@@ -185,6 +194,50 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.get("/api/reports/{report_id}", response_model=ReportDetail, tags=["reports"])
     def get_report(report_id: int, database: DbDep) -> ReportDetail:
         return ReportDetail(**service.get_report(database, report_id))
+
+    # -- usage index backfill + discrepancy audit -------------------------
+
+    @app.get(
+        "/api/usage-index/backfill",
+        response_model=BackfillStatusOut,
+        tags=["usage-audit"],
+        summary="Backfill progress of the snapshot-derived usage index",
+    )
+    def get_usage_backfill(database: DbDep) -> BackfillStatusOut:
+        return BackfillStatusOut(**usage.get_backfill_status(database))
+
+    @app.post(
+        "/api/usage-index/backfill/batches",
+        response_model=BackfillBatchOut,
+        tags=["usage-audit"],
+        summary="Run up to max_batches backfill batches (at most 100 reports each)",
+    )
+    def run_usage_backfill(
+        database: DbDep,
+        max_batches: Annotated[int, Query(ge=1, le=10000)] = 1,
+        batch_size: Annotated[int, Query(ge=1, le=100)] = 100,
+    ) -> BackfillBatchOut:
+        return BackfillBatchOut(
+            **usage.run_backfill_batches(
+                database, max_batches=max_batches, batch_size=batch_size
+            )
+        )
+
+    @app.get(
+        "/api/segments/{segment_id}/usage-discrepancies",
+        response_model=UsageDiscrepancyOut,
+        tags=["usage-audit"],
+        summary="Audit cited readings for one segment over <= 31 days",
+    )
+    def get_usage_discrepancies(
+        segment_id: int,
+        database: DbDep,
+        start: date = Query(..., description="inclusive first day, ISO date"),
+        end: date = Query(..., description="inclusive last day, ISO date"),
+    ) -> UsageDiscrepancyOut:
+        return UsageDiscrepancyOut(
+            **usage.query_discrepancies(database, segment_id, start, end)
+        )
 
     return app
 

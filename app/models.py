@@ -144,3 +144,56 @@ class HealthOut(BaseModel):
     status: str
     database: str
     version: str
+
+
+# ---------------------------------------------------------------------------
+# Usage-index backfill and discrepancy audit
+# ---------------------------------------------------------------------------
+
+
+class UsageReportRef(BaseModel):
+    report_id: int
+    role: Literal["target", "control"]
+    status: ReportStatus
+
+
+class UsageValueGroup(BaseModel):
+    kwh_per_lamp: float
+    reports: list[UsageReportRef]
+
+
+class UsageDiscrepancyDay(BaseModel):
+    date: date
+    state: Literal["discrepancy", "consistent", "no_data"]
+    values: list[UsageValueGroup] = Field(default_factory=list)
+
+
+class PendingCheckDay(BaseModel):
+    date: date
+    reason: Literal["unbackfilled_report_window"]
+    unbackfilled_report_ids: list[int]
+
+
+class UsageDiscrepancyOut(BaseModel):
+    segment_id: int
+    start: date
+    end: date
+    backfill_status: Literal["not_started", "running", "completed"]
+    pending_check_dates: list[PendingCheckDay]
+    days: list[UsageDiscrepancyDay]
+
+
+class BackfillStatusOut(BaseModel):
+    status: Literal["not_started", "running", "completed"]
+    last_processed_report_id: int
+    last_batch_size: int
+    total_reports: int
+    indexed_reports: int
+    remaining_reports: int
+    last_error: str | None = None
+    updated_at: str | None = None
+
+
+class BackfillBatchOut(BackfillStatusOut):
+    batches_run: int
+    batch_limit: int

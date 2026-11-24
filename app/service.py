@@ -721,6 +721,12 @@ def issue_report(
             ),
         )
         report_id = int(cur.lastrowid)
+        # New reports are indexed inside the same write transaction, so the
+        # discrepancy audit can cite them immediately without reading snapshots
+        # at query time.
+        from .usage import index_report
+
+        index_report(conn, report_id)
         report = _report_detail(conn, report_id)
         return ReportIssueResult(
             status="issued",
